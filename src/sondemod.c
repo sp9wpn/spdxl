@@ -44,6 +44,9 @@
 #ifndef sondeaprs_H_
 #include "sondeaprs.h"
 #endif
+#include "sondetypes.h"
+
+
 
 #include <arpa/inet.h>
 #include <netinet/in.h>
@@ -54,6 +57,10 @@
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
+
+#include <netinet/in.h>
+#include <arpa/inet.h>
+
 
 /* decode RS92, RS41, SRS-C34 and DFM06 Radiosonde by OE5DXL */
 /*FROM rsc IMPORT initrsc, decodersc; */
@@ -76,6 +83,7 @@
 /*16*/
 
 #define sondemod_ASYNBITS 10
+
 
 static char sondemod_CALIBFRAME = 'e';
 
@@ -104,7 +112,9 @@ static char sondemod_EMPTYAUX = '\003';
 #define sondemod_FASTALM 4
 /* reread almanach if old */
 
-uint32_t save2csv, disSKP=0,saveLog=0;
+uint32_t save2csv, saveLog=0;
+
+char SKPip[50];
 
 typedef char FILENAME[1024];
 
@@ -311,14 +321,52 @@ struct CONTEXTMP3 {
    char posok;
    char framesent;
    float freq;
-   //uint32_t gpssecond;
    uint32_t prevgpstime;
-   //uint32_t tused;
    uint32_t prevfrno;
    double prevalt,prevlon,prevlat;
    double vbat;
    float snd;
 };
+
+
+struct CONTEXTIMS;
+
+typedef struct CONTEXTIMS * pCONTEXTIMS;
+
+struct CONTEXTIMS {
+   pCONTEXTIMS next;
+   OBJNAME name;
+   char posok;
+   char framesent;
+   float freq;
+   uint16_t framenum;
+   uint32_t prevgpstime;
+   uint32_t prevfrno;
+   double prevalt,prevlon,prevlat;
+   double vbat;
+   float snd;
+   uint32_t tused;
+};
+
+struct CONTEXTATMS;
+
+typedef struct CONTEXTATMS * pCONTEXTATMS;
+
+struct CONTEXTATMS {
+   pCONTEXTATMS next;
+   OBJNAME name;
+   char posok;
+   char framesent;
+   float freq;
+   uint16_t framenum;
+   uint32_t prevgpstime;
+   uint32_t prevfrno;
+   double prevalt,prevlon,prevlat;
+   double vbat;
+   float snd;
+   uint32_t tused;
+};
+
 
 
 struct CONTEXTPS;
@@ -413,6 +461,8 @@ static pCONTEXTPS pcontextps;
 static pCONTEXTM10 pcontextm10;
 static pCONTEXTM20 pcontextm20;
 static pCONTEXTMP3 pcontextmp3;
+static pCONTEXTIMS pcontextims;
+static pCONTEXTATMS pcontextatms;
 
 // SKP
 
@@ -428,8 +478,8 @@ time_t oldMTime;
 #include<netdb.h> //hostent
 #include<arpa/inet.h>
 
-struct sockaddr_in serv_addr;
-int sockfd, i, slen=sizeof(serv_addr);
+struct sockaddr_in serv_addr,serv_addrtcp;
+int sockfd,socket_fdtcp, i, slen=sizeof(serv_addr);
 char UDPbuf[BUFLEN];
 
 
@@ -515,7 +565,7 @@ int read_csv()
 			dBs[cnt].lon=atof(txt);
 			break;
                     case 3:
-			dBs[cnt].alt=atol(txt);
+			dBs[cnt].alt=strtoul(txt, NULL, 10);
 			break;
                     case 4:
 			dBs[cnt].speed=atof(txt);
@@ -530,7 +580,7 @@ int read_csv()
 			dBs[cnt].frq=atof(txt);
 			break;
                     case 8:
-			dBs[cnt].time=atol(txt);
+			dBs[cnt].time=strtoul(txt, NULL, 10);;
 			break;
                 }
 		i++;
@@ -600,10 +650,49 @@ unsigned int passAprs(char *pas){
 }
 
 
-void  saveMysql( char *name,unsigned int frameno, double lat, double lon, double alt, double speed, double dir, double climb,int typ,char bk, unsigned int swv,double ozon, char aux, double press,  float frq, float vbat, float t1, float t2, float hum){
+int getSKP(){
+    if(h2ip("snd.skp.wodzislaw.pl",SKPip)){
+            fprintf(stderr,"\r\nCan't resolve DNS address\r\n");
+            SKPip[0]=0;
+            return 0;
+    }
+
+    if ((sockfd = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP))==-1)
+        printf("err: socket UDP\n");
+
+
+//    struct hostent *server_host;
+//    struct sockaddr_in server_address;
+//    server_host = gethostbyname("snd.skp.wodzislaw.pl");
+//    memset(&serv_addrtcp, 0, sizeof server_address);
+//    serv_addrtcp.sin_family = AF_INET;
+//    serv_addrtcp.sin_port = htons(9931);
+//    memcpy(&serv_addrtcp.sin_addr.s_addr, server_host->h_addr, server_host->h_length);
+
+
+//    if ((socket_fdtcp = socket(AF_INET, SOCK_STREAM, 0)) == -1) {
+//        printf("err: socket TCP\n");
+//    }
+//    connect(socket_fdtcp, (struct sockaddr *)&serv_addrtcp, sizeof serv_addrtcp);
+
+    bzero(&serv_addr, sizeof(serv_addr));
+    serv_addr.sin_family = AF_INET;
+    serv_addr.sin_port = htons(PORT);
+    if (inet_aton(SKPip, &serv_addr.sin_addr)==0)
+    {
+        fprintf(stderr, "inet_aton() failed\n");
+        return(0);
+    }
+
+
+    return(1);
+}
+
+
+void  saveMysql( char *name,uint32_t frameno, double lat, double lon, double alt, double speed, double dir, double climb,int typ,char bk, unsigned int swv,double ozon, char aux, double press,  float frq, float vbat, float t1, float t2, float hum){
     char str[1024];
     char hash[40];
-
+    int ret;
     char ToHash[300];
     char Pass[20];
     char dp=strlen(dbPass);
@@ -620,7 +709,7 @@ void  saveMysql( char *name,unsigned int frameno, double lat, double lon, double
     	    strcpy(Pass,dbPass);
 	str[0]=0;
 
-        sprintf( UDPbuf, "S0;1;0;0;%s;%lf;%lf;%5.1lf;%u;%3.1f;%3.0f;%3.1f;%4.1f;%4.1f;%u;%i;%i;%i;%7.3f;%3.2f;%3.1f;%3.1f;%3.0f;%s",
+        sprintf( UDPbuf, "S0;1;7;0;%s;%lf;%lf;%5.1lf;%lu;%3.1f;%3.0f;%3.1f;%4.1f;%4.1f;%u;%i;%i;%i;%7.3f;%3.2f;%3.1f;%3.1f;%3.0f;%s",
                                 name,lat,lon,alt,frameno,speed,dir,climb,press,ozon,swv,bk,typ,aux,frq,vbat,t1,t2,hum,mycall);
 
     	//wylicznie hasha
@@ -632,6 +721,9 @@ void  saveMysql( char *name,unsigned int frameno, double lat, double lon, double
     	strcat(UDPbuf,";");
     	strcat(UDPbuf,hash);
 
+	if(SKPip[0]==0)
+	    ret=getSKP();
+	if(ret==0) return;
 
         if (sendto(sockfd, UDPbuf, BUFLEN, 0, (struct sockaddr*)&serv_addr, slen)==-1)
             printf("err: sendto()");
@@ -639,11 +731,30 @@ void  saveMysql( char *name,unsigned int frameno, double lat, double lon, double
 	    printf("send to DB\n");
 
 
+	int res;
+	int error_code;
+	int error_code_size = sizeof(error_code);
+
+//	printf("TX0:%s:%u\n",UDPbuf,strlen(UDPbuf));
+//	connect(socket_fdtcp, (struct sockaddr *)&serv_addrtcp, sizeof serv_addrtcp);
+
+//	write(socket_fdtcp, UDPbuf, sizeof(UDPbuf));
+//	close(socket_fdtcp);
+//	printf("TX\n");
+/*
+	getsockopt(socket_fdtcp, SOL_SOCKET, SO_ERROR, &error_code, &error_code_size);
+	printf("R1:%i\n",error_code);
+	if(error_code){
+	    res=connect(socket_fdtcp, (struct sockaddr *)&serv_addrtcp, sizeof serv_addrtcp);
+	    perror("reconnectTCP");
+	    printf("R2:%i\n",res);
+	}
+*/
     }
 }
 
 
-void save_Slog( char *name,unsigned int frameno, double lat, double lon, double alt, double speed, double dir, double climb,int typ,char bk, unsigned int swv,double ozon, char aux, double press,  float frq, float vbat, float t1, float t2, float hum){
+void save_Slog( char *name,uint32_t frameno, double lat, double lon, double alt, double speed, double dir, double climb,int typ,char bk, unsigned int swv,double ozon, char aux, double press,  float frq, float vbat, float t1, float t2, float hum){
 
     int i,newS=1;
     time_t minTime=time(NULL),difftime,lTime=time(NULL);
@@ -664,7 +775,7 @@ void save_Slog( char *name,unsigned int frameno, double lat, double lon, double 
 //    if(saveLog){
         fi = fopen(sf, "a+");
 	if (fi){
-    	    fprintf(fi,"%s;%s;%05u;%0.5f;%0.5f;%0.0f;%0.2f;%0.2f;%0.2f;%i,%0.3f;%i;%0.1f;%0.3f;%02.1f;%03.1f;%03.1f;%03.1f;\n",
+    	    fprintf(fi,"%s;%s;%05lu;%0.5f;%0.5f;%0.0f;%0.2f;%0.2f;%0.2f;%i,%0.3f;%i;%0.1f;%0.3f;%02.1f;%03.1f;%03.1f;%03.1f;\n",
 		s,name,frameno,X2C_DIVL(lat,1.7453292519943E-2),X2C_DIVL(lon,1.7453292519943E-2),alt,speed,dir,climb, typ,ozon,aux,press,frq,vbat,t1,t2,hum);
 	    fclose(fi);
         }
@@ -675,7 +786,7 @@ void save_Slog( char *name,unsigned int frameno, double lat, double lon, double 
 
 }
 
-int store_sonde_db( char *name,unsigned int frameno, double lat, double lon, double alt, double speed, double dir, double climb,int typ,char bk, unsigned int swv,double ozon, char aux, double press,  float frq, float vbat, float t1, float t2, float hum){
+int store_sonde_db( char *name,uint32_t frameno, double lat, double lon, double alt, double speed, double dir, double climb,int typ,char bk, unsigned int swv,double ozon, char aux, double press,  float frq, float vbat, float t1, float t2, float hum){
 
     int i,newS=1;
     time_t minTime=time(NULL),difftime,lTime=time(NULL);
@@ -716,13 +827,13 @@ int store_sonde_db( char *name,unsigned int frameno, double lat, double lon, dou
     dBs[i].hum=hum;
 
     difftime=minTime-dBs[i].sendtime;
-    printf("***TIME %lu ALT:%1.0f NEW:%i\n",difftime,alt,newS);
-    if(disSKP==0){
-	if(alt<3000 || difftime>SEND_INT){
-	    saveMysql( name, frameno, dBs[i].lat, dBs[i].lon, alt, speed, dir, climb, typ, bk, swv, ozon, aux, press, frq,vbat,t1,t2,hum);
-	    dBs[i].sendtime=time(NULL);
-	}
+    //printf("***TIME %lu ALT:%1.0f NEW:%i\n",difftime,alt,newS);
+    
+    if(alt<3000 || difftime>SEND_INT){
+        saveMysql( name, frameno, dBs[i].lat, dBs[i].lon, alt, speed, dir, climb, typ, bk, swv, ozon, aux, press, frq,vbat,t1,t2,hum);
+        dBs[i].sendtime=time(NULL);
     }
+    
     if(save2csv) save_csv();
 
 
@@ -732,7 +843,7 @@ int store_sonde_db( char *name,unsigned int frameno, double lat, double lon, dou
 //-SKP
 
 //SQ6QV
-int store_sonde_rs(char *name,unsigned int frameno, double lat, double lon, double alt, double speed, double dir, double climb,int typ,char bk, unsigned int swv,double ozon, char aux, double press,  float frq, float vbat, float t1, float t2, float hum, char * src_call){
+int store_sonde_rs(char *name,uint32_t frameno, double lat, double lon, double alt, double speed, double dir, double climb,int typ,char bk, unsigned int swv,double ozon, char aux, double press,  float frq, float vbat, float t1, float t2, float hum, char * src_call){
 
 FILE * band_lock;
 
@@ -907,7 +1018,7 @@ static void Parms(void)
             saveLog=1;
          }
          else if (h[1U]=='D') {
-            disSKP=1;
+            
          }
 
          else if (h[1U]=='v') sondeaprs_verb = 1;
@@ -1560,8 +1671,7 @@ static void docalib(const char sf[], uint32_t sf_len,
    } /* end for */
    if (i<=objname_len-1) objname0[i] = 0;
    if (new0) readcontext(cont, objname0, objname_len);
-   *frameno = (uint32_t)(uint8_t)sf[0UL]+(uint32_t)(uint8_t)
-                sf[1UL]*256UL;
+   *frameno = (uint32_t)(uint8_t)sf[0UL]+(uint32_t)(uint8_t)sf[1UL]*256UL;
    if (sondeaprs_verb) {
       if (new0) osi_WrStr("new ", 5ul);
       osic_WrINT32(*frameno, 1UL); /* frame no */
@@ -1990,9 +2100,9 @@ static void decodeframe(uint8_t m, uint32_t ip, uint32_t fromport)
          }
 		
          anonym1->framesent = 1;
-        store_sonde_db( objname,frameno,anonym1->lat,anonym1->long0,anonym1->heig,anonym1->speed,anonym1->dir,anonym1->climb,9,2,0,anonym1->ozon,anonym1->aux,anonym1->hp,(double)mhz,0,anonym1->temp,0,anonym1->hyg);
-        store_sonde_rs( objname,frameno,anonym1->lat,anonym1->long0,anonym1->heig,anonym1->speed,anonym1->dir,anonym1->climb,9,2,0,anonym1->ozon,anonym1->aux,anonym1->hp,(double)mhz,0,anonym1->temp,0,anonym1->hyg,usercall);
-	if(saveLog) save_Slog( objname,frameno,anonym1->lat,anonym1->long0,anonym1->heig,anonym1->speed,anonym1->dir,anonym1->climb,9,2,0,anonym1->ozon,anonym1->aux,anonym1->hp,(double)mhz,0,anonym1->temp,0,anonym1->hyg);
+        store_sonde_db( objname,frameno,anonym1->lat,anonym1->long0,anonym1->heig,anonym1->speed,anonym1->dir,anonym1->climb,ST_RS92,2,0,anonym1->ozon,anonym1->aux,anonym1->hp,(double)mhz,0,anonym1->temp,0,anonym1->hyg);
+        store_sonde_rs( objname,frameno,anonym1->lat,anonym1->long0,anonym1->heig,anonym1->speed,anonym1->dir,anonym1->climb,ST_RS92,2,0,anonym1->ozon,anonym1->aux,anonym1->hp,(double)mhz,0,anonym1->temp,0,anonym1->hyg,usercall);
+	if(saveLog) save_Slog( objname,frameno,anonym1->lat,anonym1->long0,anonym1->heig,anonym1->speed,anonym1->dir,anonym1->climb,ST_RS92,2,0,anonym1->ozon,anonym1->aux,anonym1->hp,(double)mhz,0,anonym1->temp,0,anonym1->hyg);
       }
       crdone = 1;
    }
@@ -2501,8 +2611,8 @@ static void decodec34(const char rxb[], uint32_t rxb_len,
          */
          if (lonok && latok) {
             anonym2->lastsent = systime;
-	    int tc=3;
-	    if(anonym2->name[2]=='5') tc=5;
+	    int tc=ST_C34;
+	    if(anonym2->name[2]=='5') tc=ST_C50;
             store_sonde_db(anonym2->name,0,exlat,exlon,anonym2->alt,anonym2->speed,anonym2->dir,anonym2->clmb,tc,2,0,0.0,0,0,frq,0,0,0,0);
             store_sonde_rs(anonym2->name,0,exlat,exlon,anonym2->alt,anonym2->speed,anonym2->dir,anonym2->clmb,tc,2,0,0.0,0,0,frq,0,0,0,0,usercall);
 	    if(saveLog) save_Slog(anonym2->name,0,exlat,exlon,anonym2->alt,anonym2->speed,anonym2->dir,anonym2->clmb,tc,2,0,0.0,0,0,frq,0,0,0,0);
@@ -2537,14 +2647,14 @@ static void decodedfm6(const char rxb[], uint32_t rxb_len, uint32_t ip, uint32_t
    unsigned int frno,i,j,ok=0;
    char id[20];
    char typ[10];
-   int  typm=6;
+   int  typm=ST_DFM6;
     printf("DFM: %c%c%c\n",rxb[0UL],rxb[1UL],rxb[2UL]);
 
    if (((rxb[0UL]!='D')||(rxb[0UL]!='E'))&&( (rxb[1UL]!='6') && (rxb[1UL]!='9') && (rxb[1UL]!='D') && (rxb[1UL]!='F') && (rxb[1UL]!='X'))) return;
 
-    if(rxb[1UL]=='9') typm=7;
-    else if(rxb[1UL]=='F') typm=15;
-    else if(rxb[1UL]=='D') typm=17;
+    if(rxb[1UL]=='9') typm=ST_DFM9;
+    else if(rxb[1UL]=='F') typm=ST_DFM15;
+    else if(rxb[1UL]=='D') typm=ST_DFM17;
     
     if(rxb[0UL]=='E') typm+=100;
 
@@ -2770,6 +2880,17 @@ static int32_t getint16(const char frame[], uint32_t frame_len,
    return (int32_t)n;
 } /* end getint16() */
 
+static int32_t getuint16(const char frame[], uint32_t frame_len,
+                uint32_t p)
+{
+   uint32_t n;
+   n = (uint32_t)(uint8_t)frame[p]+256UL*(uint32_t)(uint8_t)
+                frame[p+1UL];
+   return (int32_t)n;
+} /* end getint16() */
+
+
+
 static int32_t getint24(const char frame[], uint32_t frame_len, uint32_t p)
 {
    uint32_t n;
@@ -2944,6 +3065,7 @@ static void decoders41(const char rxb[], uint32_t rxb_len,
    lat = 0.0;
    long0 = 0.0;
    ozonval = 0.0;
+   int typs=ST_RS41;
 
    //SKP
    char serialNumber[6];
@@ -3005,8 +3127,7 @@ static void decoders41(const char rxb[], uint32_t rxb_len,
          }
          ++j;
       }
-      if ((char)crc!=rxb[(p+len)-2UL] || (char)X2C_LSH(crc,16,
-                -8)!=rxb[(p+len)-1UL]) {
+      if ((char)crc!=rxb[(p+len)-2UL] || (char)X2C_LSH(crc,16, -8)!=rxb[(p+len)-1UL]) {
          if (sondeaprs_verb) osi_WrStr(" ----  crc err ", 16ul);
          break;
       }
@@ -3043,7 +3164,7 @@ static void decoders41(const char rxb[], uint32_t rxb_len,
             aprsstr_Assign(pc->name, 9ul, nam, 9ul);
             if (sondeaprs_verb) osi_WrStrLn("is new ", 8ul);
          }
-         frameno = (uint32_t)getint16(rxb, rxb_len, p);
+         frameno = (uint32_t)getuint16(rxb, rxb_len, p);
 	 
 	
          if (frameno>pc->framenum) {
@@ -3065,8 +3186,7 @@ static void decoders41(const char rxb[], uint32_t rxb_len,
 	    osi_WrStrLn(" ", 1ul);
          }
          if (rxb[p+23UL]==0) {
-            pc->mhz0 = (float)(getcard16(rxb, rxb_len,
-                p+26UL)/64UL+40000UL)*0.01f+0.0005f;
+            pc->mhz0 = (float)(getcard16(rxb, rxb_len, p+26UL)/64UL+40000UL)*0.01f+0.0005f;
          }
 
 	 if (rxb[p+23UL]==1UL) {
@@ -3157,8 +3277,7 @@ static void decoders41(const char rxb[], uint32_t rxb_len,
          /*             WrStrLn("7A frame"); */
          /*             WrStrLn("7C frame"); */
          if (pc) {
-            pc->gpssecond = (uint32_t)((getint32(rxb, rxb_len,
-                p+2UL)/1000L+86382L)%86400L); /* gps TOW */
+            pc->gpssecond = (uint32_t)((getint32(rxb, rxb_len, p+2UL)/1000L+86382L)%86400L); /* gps TOW */
          }
       }
       else if (typ=='}') {
@@ -3168,8 +3287,8 @@ static void decoders41(const char rxb[], uint32_t rxb_len,
          /*             WrStrLn("7D frame"); */
          /*             WrStrLn("7B frame"); */
     //     if (pc) {
-            posrs41(rxb, rxb_len, p, &lat, &long0, &heig, &speed, &dir,
-                &climb);
+	    if(p==261) typs=ST_RS41SGM;
+            posrs41(rxb, rxb_len, p, &lat, &long0, &heig, &speed, &dir, &climb);
             pc->hp = altToPres(heig);
                 /* make hPa out of gps alt for ozone */
     //     }
@@ -3186,14 +3305,10 @@ static void decoders41(const char rxb[], uint32_t rxb_len,
                   res = 32768L-res;
                }
                pc->ozonTemp = (double)res*0.01;
-               pc->ozonuA = (double)gethex(rxb, rxb_len, p+9UL,
-                5UL)*0.0001;
-               pc->ozonBatVolt = (double)gethex(rxb, rxb_len, p+14UL,
-                2UL)*0.1;
-               pc->ozonPumpMA = (double)gethex(rxb, rxb_len, p+16UL,
-                3UL);
-               pc->ozonExtVolt = (double)gethex(rxb, rxb_len, p+19UL,
-                2UL)*0.1;
+               pc->ozonuA = (double)gethex(rxb, rxb_len, p+9UL, 5UL)*0.0001;
+               pc->ozonBatVolt = (double)gethex(rxb, rxb_len, p+14UL, 2UL)*0.1;
+               pc->ozonPumpMA = (double)gethex(rxb, rxb_len, p+16UL,  3UL);
+               pc->ozonExtVolt = (double)gethex(rxb, rxb_len, p+19UL, 2UL)*0.1;
                ozonval = calcOzone(pc->ozonuA, pc->ozonTemp, pc->hp);
 	       pc->ozonval=ozonval; 	//SKP
 	       pc->aux=1;
@@ -3229,8 +3344,7 @@ static void decoders41(const char rxb[], uint32_t rxb_len,
                   osi_WrStr(" NotCal", 8ul);
                }
                osi_WrStr(" V:", 4ul);
-               osic_WrFixed((float)gethex(rxb, rxb_len, p+18UL, 2UL)*0.1f,
-                 1L, 1UL);
+               osic_WrFixed((float)gethex(rxb, rxb_len, p+18UL, 2UL)*0.1f, 1L, 1UL);
                osi_WrStr(")", 2ul);
             }
          }
@@ -3252,14 +3366,14 @@ static void decoders41(const char rxb[], uint32_t rxb_len,
    if ((((pc && nameok) && calok) && lat!=0.0) && long0!=0.0) {
       pc->framesent = 1;
       //SKP
-      store_sonde_db( pc->name,frameno,lat,long0,heig,speed,dir,climb,4,pc->burstKill,pc->swVersion,pc->ozonval,pc->aux,0.0,(double)pc->mhz0,pc->vbat,0,0,0);
-      if(saveLog) save_Slog( pc->name,frameno,lat,long0,heig,speed,dir,climb,4,pc->burstKill,pc->swVersion,pc->ozonval,pc->aux,0.0,(double)pc->mhz0,pc->vbat,0,0,0);
+      store_sonde_db( pc->name,frameno,lat,long0,heig,speed,dir,climb,typs,pc->burstKill,pc->swVersion,pc->ozonval,pc->aux,0.0,(double)pc->mhz0,pc->vbat,0,0,0);
+      if(saveLog) save_Slog( pc->name,frameno,lat,long0,heig,speed,dir,climb,typs,pc->burstKill,pc->swVersion,pc->ozonval,pc->aux,0.0,(double)pc->mhz0,pc->vbat,0,0,0);
    }
    
      
      if (((pc && nameok) && lat!=0.0) && long0!=0.0) {
-        store_sonde_rs( pc->name,frameno,lat,long0,heig,speed,dir,climb,4,pc->burstKill,pc->swVersion,pc->ozonval,pc->aux,0.0,(double)pc->mhz0,pc->vbat,0,0,0,usercall);
-	if(saveLog) save_Slog( pc->name,frameno,lat,long0,heig,speed,dir,climb,4,pc->burstKill,pc->swVersion,pc->ozonval,pc->aux,0.0,(double)pc->mhz0,pc->vbat,0,0,0);
+        store_sonde_rs( pc->name,frameno,lat,long0,heig,speed,dir,climb,typs,pc->burstKill,pc->swVersion,pc->ozonval,pc->aux,0.0,(double)pc->mhz0,pc->vbat,0,0,0,usercall);
+	if(saveLog) save_Slog( pc->name,frameno,lat,long0,heig,speed,dir,climb,typs,pc->burstKill,pc->swVersion,pc->ozonval,pc->aux,0.0,(double)pc->mhz0,pc->vbat,0,0,0);
      }
 /*  IF verb THEN WrStrLn("") END;   */
 } /* end decoders41() */
@@ -3282,7 +3396,7 @@ int isNDig(char *txt){
 }
 
 
-static void decodem10(const char rxb[], uint32_t rxb_len, uint32_t ip, uint32_t fromport)
+static void decodem10(char rxb[], uint32_t rxb_len, uint32_t ip, uint32_t fromport)
 {
    uint32_t i;
    double dir;
@@ -3309,11 +3423,17 @@ static void decodem10(const char rxb[], uint32_t rxb_len, uint32_t ip, uint32_t 
    double frq;
    char tmps[15];
    float vbat,temp1,temp2;
-    char to[1200];
-    uint32_t time0;
-
-
-
+   char to[1200];
+   uint32_t time0;
+   int typ,typt;
+    typt=(unsigned char)rxb[5]-',';
+    
+    switch(typt){
+	case 1: typ=ST_M10;   break;
+	case 2: typ=ST_M10GT; break;
+	case 3: typ=ST_M2K2;  break;
+    }
+    rxb[5]=',';
 
     int cnt=0;
     for (i=0; i<105; i++)
@@ -3340,58 +3460,58 @@ static void decodem10(const char rxb[], uint32_t rxb_len, uint32_t ip, uint32_t 
 
 
         tmp = strtok(NULL, ",");        //frq
-         if(isNDig(tmp)) return(0);
+         if(isNDig(tmp)) return;
 	frq=atof(tmp)/1000;
 
         tmp = strtok(NULL, ",");        //nazwa
-         if(isNDig(tmp)) return(0);
+         if(isNDig(tmp)) return;
          strcpy(nam,tmp);
 
         tmp = strtok(NULL, ",");        //time
-         if(isNDig(tmp)) return(0);
-         time0=atol(tmp);
+         if(isNDig(tmp)) return;
+         time0=strtoul(tmp, NULL, 10);;
 	 frameno=time0;
 
         tmp = strtok(NULL, ",");        //lat
-         if(isNDig(tmp)) return(0);
+         if(isNDig(tmp)) return;
          lat=atof(tmp);
 
         tmp = strtok(NULL, ",");        //lon
-         if(isNDig(tmp)) return(0);
+         if(isNDig(tmp)) return;
         lon=atof(tmp);
 
         tmp = strtok(NULL, ",");        //alt
-         if(isNDig(tmp)) return(0);
+         if(isNDig(tmp)) return;
         alt=atof(tmp);
 
         tmp = strtok(NULL, ",");        //dir
-         if(isNDig(tmp)) return(0);
+         if(isNDig(tmp)) return;
         dir=atof(tmp);
 
         tmp = strtok(NULL, ",");        //v
-         if(isNDig(tmp)) return(0);
+         if(isNDig(tmp)) return;
         v=atof(tmp);
 
         tmp = strtok(NULL, ",");        //vv
-        if(isNDig(tmp)) return(0);
+        if(isNDig(tmp)) return;
         vv=atof(tmp);
 
         tmp = strtok(NULL, ",");        //vbat
-         if(isNDig(tmp)) return(0);
+         if(isNDig(tmp)) return;
         vbat=atof(tmp);
 
         tmp = strtok(NULL, ",");        //temp1
-         if(isNDig(tmp)) return(0);
+         if(isNDig(tmp)) return;
         temp1=atof(tmp);
 
         tmp = strtok(NULL, ",");        //temp2
-         if(isNDig(tmp)) return(0);
+         if(isNDig(tmp)) return;
         temp2=atof(tmp);
 
         tmp = strtok(NULL, ",");        //fq555
 	tmp[6]=0;
 
-         if(isNDig(tmp)) return(0);
+         if(isNDig(tmp)) return;
         fq555=atof(tmp);
 
 
@@ -3445,11 +3565,11 @@ static void decodem10(const char rxb[], uint32_t rxb_len, uint32_t ip, uint32_t 
    if (pc && lat>0 && lat<90 && lon>0 && alt<45000 ) {
 
       if (sondeaprs_verb) 
-	printf("M10: (%s) %s,%012lu,%09.5f,%010.5f,%05.0f,%03.0f,%05.1f,%05.1f,%05.2f,%06.1f,%06.1f,%06.0f\n",usercall,nam,time0,lat,lon,alt,dir,v,vv,vbat,temp1,temp2,fq555);
+	printf("M10(%i): (%s) %s,%012lu,%09.5f,%010.5f,%05.0f,%03.0f,%05.1f,%05.1f,%05.2f,%06.1f,%06.1f,%06.0f\n",typ,usercall,nam,time0,lat,lon,alt,dir,v,vv,vbat,temp1,temp2,fq555);
 
-      store_sonde_db( pc->name,pc->framenum,lat* 1.7453292519943E-2,lon* 1.7453292519943E-2,alt,v,dir,vv,1,0,0,0,0,0.0,frq,vbat,temp1,temp2,fq555);
-      store_sonde_rs( pc->name,pc->framenum,lat* 1.7453292519943E-2,lon* 1.7453292519943E-2,alt,v,dir,vv,1,0,0,0,0,0.0,frq,vbat,temp1,temp2,fq555,usercall);
-      if(saveLog) save_Slog( pc->name,pc->framenum,lat* 1.7453292519943E-2,lon* 1.7453292519943E-2,alt,v,dir,vv,1,0,0,0,0,0.0,frq,vbat,temp1,temp2,fq555);
+      store_sonde_db( pc->name,pc->framenum,lat* 1.7453292519943E-2,lon* 1.7453292519943E-2,alt,v,dir,vv,typ,0,0,0,0,0.0,frq,vbat,temp1,temp2,fq555);
+      store_sonde_rs( pc->name,pc->framenum,lat* 1.7453292519943E-2,lon* 1.7453292519943E-2,alt,v,dir,vv,typ,0,0,0,0,0.0,frq,vbat,temp1,temp2,fq555,usercall);
+      if(saveLog) save_Slog( pc->name,pc->framenum,lat* 1.7453292519943E-2,lon* 1.7453292519943E-2,alt,v,dir,vv,typ,0,0,0,0,0.0,frq,vbat,temp1,temp2,fq555);
       pc->framesent = 1;
 
     }
@@ -3518,38 +3638,38 @@ static void decodem20(const char rxb[], uint32_t rxb_len, uint32_t ip, uint32_t 
    }
 
         tmp = strtok(NULL, ",");        //frq
-         if(isNDig(tmp)) return(0);
+         if(isNDig(tmp)) return;
 	frq=atof(tmp)/1000;
         tmp = strtok(NULL, ",");        //nazwa
-         if(isNDig(tmp)) return(0);
+         if(isNDig(tmp)) return;
          strcpy(nam,tmp);
         tmp = strtok(NULL, ",");        //time
-         if(isNDig(tmp)) return(0);
-         time0=atol(tmp);
+         if(isNDig(tmp)) return;
+         time0=strtoul(tmp, NULL, 10);
 	 frameno=time0;
         tmp = strtok(NULL, ",");        //lat
-         if(isNDig(tmp)) return(0);
+         if(isNDig(tmp)) return;
          lat=atof(tmp);
         tmp = strtok(NULL, ",");        //lon
-         if(isNDig(tmp)) return(0);
+         if(isNDig(tmp)) return;
         lon=atof(tmp);
         tmp = strtok(NULL, ",");        //alt
-         if(isNDig(tmp)) return(0);
+         if(isNDig(tmp)) return;
         alt=atof(tmp);
         tmp = strtok(NULL, ",");        //dir
-         if(isNDig(tmp)) return(0);
+         if(isNDig(tmp)) return;
         dir=atof(tmp);
         tmp = strtok(NULL, ",");        //v
-         if(isNDig(tmp)) return(0);
+         if(isNDig(tmp)) return;
         v=atof(tmp);
         tmp = strtok(NULL, ",");        //vv
-        if(isNDig(tmp)) return(0);
+        if(isNDig(tmp)) return;
         vv=atof(tmp);
         tmp = strtok(NULL, ",");        //vbat
-         if(isNDig(tmp)) return(0);
+         if(isNDig(tmp)) return;
         vbat=atof(tmp);
         tmp = strtok(NULL, ",");        //temp1
-         if(isNDig(tmp)) return(0);
+         if(isNDig(tmp)) return;
         temp1=atof(tmp);
         tmp = strtok(NULL, ",");        //temp2
 	tmp[6]=0;
@@ -3609,9 +3729,9 @@ static void decodem20(const char rxb[], uint32_t rxb_len, uint32_t ip, uint32_t 
       if (sondeaprs_verb) 
 	printf("M20: (%s) %s,%012lu,%09.5f,%010.5f,%05.0f,%03.0f,%05.1f,%05.1f,%05.2f,%06.1f,%06.1f\n",usercall,nam,time0,lat,lon,alt,dir,v,vv,vbat,temp1,temp2);
 
-      store_sonde_db( pc->name,pc->framenum,lat* 1.7453292519943E-2,lon* 1.7453292519943E-2,alt,v,dir,vv,2,0,0,0,0,0.0,frq,vbat,temp1,temp2,0);
-      store_sonde_rs( pc->name,pc->framenum,lat* 1.7453292519943E-2,lon* 1.7453292519943E-2,alt,v,dir,vv,2,0,0,0,0,0.0,frq,vbat,temp1,temp2,0,usercall);
-      if(saveLog) save_Slog( pc->name,pc->framenum,lat* 1.7453292519943E-2,lon* 1.7453292519943E-2,alt,v,dir,vv,2,0,0,0,0,0.0,frq,vbat,temp1,temp2,0);
+      store_sonde_db( pc->name,pc->framenum,lat* 1.7453292519943E-2,lon* 1.7453292519943E-2,alt,v,dir,vv,ST_M20,0,0,0,0,0.0,frq,vbat,temp1,temp2,0);
+      store_sonde_rs( pc->name,pc->framenum,lat* 1.7453292519943E-2,lon* 1.7453292519943E-2,alt,v,dir,vv,ST_M20,0,0,0,0,0.0,frq,vbat,temp1,temp2,0,usercall);
+      if(saveLog) save_Slog( pc->name,pc->framenum,lat* 1.7453292519943E-2,lon* 1.7453292519943E-2,alt,v,dir,vv,ST_M20,0,0,0,0,0.0,frq,vbat,temp1,temp2,0);
       pc->framesent = 1;
 
     }
@@ -3815,7 +3935,7 @@ static void decodepils(const char rxb[], uint32_t rxb_len, uint32_t ip, uint32_t
     dategp = 0;
     for (i = 0; i < 4; i++)  dategp |= bytes[i] << (8*(3-i));
 
-    gpstime=(int32_t)(((timegp%100000)/1000.0)+ (timegp%10000000)/100000*60+ 3600*timegp/10000000) +86400* dategp%100;
+    gpstime=(int32_t)(((timegp%100000)/1000.0)+ (timegp%10000000)/100000*60+ 3600*timegp/10000000);
     
 
 /*
@@ -3883,9 +4003,9 @@ static void decodepils(const char rxb[], uint32_t rxb_len, uint32_t ip, uint32_t
    if ((pc && lat!=0.0) && long0!=0.0) {                            //if connected and valid lat/long
      
       
-      store_sonde_db( pc->name,gpstime,lat,long0,heig,speed,dir,climb,8,0,0,0,0,0.0,frq,0,0,0,0);
-      store_sonde_rs( pc->name,gpstime,lat,long0,heig,speed,dir,climb,8,0,0,0,0,0.0,frq,0,0,0,0,usercall);
-      if(saveLog) save_Slog( pc->name,gpstime,lat,long0,heig,speed,dir,climb,8,0,0,0,0,0.0,frq,0,0,0,0);
+      store_sonde_db( pc->name,gpstime,lat,long0,heig,speed,dir,climb,ST_PIL,0,0,0,0,0.0,frq,0,0,0,0);
+      store_sonde_rs( pc->name,gpstime,lat,long0,heig,speed,dir,climb,ST_PIL,0,0,0,0,0.0,frq,0,0,0,0,usercall);
+      if(saveLog) save_Slog( pc->name,gpstime,lat,long0,heig,speed,dir,climb,ST_PIL,0,0,0,0,0.0,frq,0,0,0,0);
 
       pc->framesent = 1;
    }
@@ -4110,9 +4230,9 @@ static void decodemp3(const char rxb[], uint32_t rxb_len, uint32_t ip, uint32_t 
 
 	    if(lat>0.0 && lon>0.0 && alt<40000.0){
 		printf("%s %02i:%02i:%02i f: %f La: %f Lo: %f Alt: %0.0fm\n",nam, tmpD[5],tmpD[6],tmpD[7],frq,lat/1.7453292519943E-2,lon/1.7453292519943E-2,alt);
-		store_sonde_db( pc->name,frno,lat,lon,alt,speed,dirC,vv,20,0,0,0,0,0.0,frq,pc->vbat,0,pc->snd,0);
-        	store_sonde_rs( pc->name,frno,lat,lon,alt,speed,dirC,vv,20,0,0,0,0,0.0,frq,pc->vbat,0,0,0,usercall);
-        	if(saveLog) save_Slog( pc->name,frno,lat,lon,alt,speed,dirC,vv,20,0,0,0,0,0.0,frq,pc->vbat,0,pc->snd,0);
+		store_sonde_db( pc->name,frno,lat,lon,alt,speed,dirC,vv,ST_MP3,0,0,0,0,0.0,frq,pc->vbat,0,pc->snd,0);
+        	store_sonde_rs( pc->name,frno,lat,lon,alt,speed,dirC,vv,ST_MP3,0,0,0,0,0.0,frq,pc->vbat,0,0,0,usercall);
+        	if(saveLog) save_Slog( pc->name,frno,lat,lon,alt,speed,dirC,vv,ST_MP3,0,0,0,0,0.0,frq,pc->vbat,0,pc->snd,0);
 		pc->framesent=1;
 	    }
       }
@@ -4124,6 +4244,328 @@ static void decodemp3(const char rxb[], uint32_t rxb_len, uint32_t ip, uint32_t 
 
 
 } /* end decodemp3() */
+
+
+static void decodeims(const char rxb[], uint32_t rxb_len, uint32_t ip, uint32_t fromport)
+{
+   CALLSSID usercall;
+   double frq;
+   OBJNAME nam;
+   char tmps[20];
+   uint8_t tmpD[155];
+   uint32_t gpstime,frno;
+   pCONTEXTIMS pc;
+   pCONTEXTIMS pc0;
+   pCONTEXTIMS pc1;
+    int k;
+   double dir;
+   double v;
+   double vv;
+   double vn;
+   double ve;
+   double alt;
+   double lon;
+   double lat;
+   uint32_t tmpf;
+   char sntxt[12]={0,0};
+   char frs[10];
+    int calok=0;
+   float *fcfg = (float *)&tmpf;
+   double vH,freq;
+   char nsend=0;
+
+    if(rxb[0]!='i' && rxb[0]!='I') return;
+    if(rxb[0]=='i') { nsend=1;}
+
+    getcall(rxb+62, rxb_len-62, usercall, 11ul);  
+
+    tmps[0]=rxb[68];
+    tmps[1]=rxb[69];
+    tmps[2]=rxb[70];
+    tmps[3]='.';
+    tmps[4]=rxb[71];
+    tmps[5]=rxb[72];
+    tmps[6]=rxb[73];
+    tmps[7]=0;
+    frq=atof(tmps);
+    uint16_t ms,hm,dt;
+
+    time_t t = time(NULL);
+    struct tm tm = *gmtime(&t);
+    struct tm tmfn = *gmtime(&t);
+    int czas=tm.tm_mon + 1 + tm.tm_mday;
+    
+    strncpy(nam,rxb,9);
+    nam[9]=0;
+    nam[0]='I';
+
+    strncpy(tmps,rxb+9,5);
+    tmps[5]=0;
+    frno=atol(tmps);
+
+    strncpy(tmps,rxb+14,7);
+    tmps[7]=0;
+    lat=atof(tmps)/100000;
+
+    strncpy(tmps,rxb+21,8);
+    tmps[8]=0;
+    lon=atof(tmps)/100000;
+
+    strncpy(tmps,rxb+29,5);
+    tmps[5]=0;
+    alt=atof(tmps);
+
+    strncpy(tmps,rxb+34,3);
+    tmps[3]=0;
+    dir=atoi(tmps);
+
+    strncpy(tmps,rxb+37,4);
+    tmps[4]=0;
+    vv=(atof(tmps)/10)-200.0;
+
+    strncpy(tmps,rxb+41,6);
+    tmps[6]=0;
+    freq=atof(tmps)/1000.0;
+
+
+   pc = 0;
+
+      pc = pcontextims;
+      pc0 = 0;
+      for (;;) {
+         if (pc==0) break;
+         pc1 = pc->next;
+         if (pc->tused+3600UL<systime) {
+
+            if (pc0==0) pcontextims = pc1;
+            else pc0->next = pc1;
+            osic_free((char * *) &pc, sizeof(struct CONTEXTIMS));
+         }
+         else {
+            if (aprsstr_StrCmp(nam, 10ul, pc->name, 10ul)) break;
+            pc0 = pc;
+         }
+         pc = pc1;
+      }
+      if (pc==0) {
+         osic_alloc((char * *) &pc, sizeof(struct CONTEXTIMS));
+         if (pc==0) Error("allocate context out im memory", 31ul);
+         memset((char *)pc,(char)0,sizeof(struct CONTEXTIMS));
+         pc->next = pcontextims;
+         pcontextims = pc;
+         aprsstr_Assign(pc->name, 10ul, nam, 10ul);
+         if (sondeaprs_verb) osi_WrStrLn("is new ", 8ul);
+      }
+
+      if (frno > pc->framenum) {
+         pc->framesent = 0;
+         calok = 1;
+         pc->framenum = frno;
+         pc->tused = systime;
+      }
+      else if (pc->framenum==frno) {
+         if (!pc->framesent) calok = 1;
+      }
+      else if (sondeaprs_verb) {
+         osi_WrStr(" got old frame ", 16ul);
+         osic_WrINT32(frno, 1UL);
+         osi_WrStr(" expected> ", 12ul);
+         osic_WrINT32(pc->framenum, 1UL);
+         osi_WrStr(" ", 2ul);
+      }
+
+      if(freq>=400.0) frq=freq;
+
+      if (pc && lat>0 && lat<90 && lon<90 && lon>0 && alt<45000 ) {
+
+        if (sondeaprs_verb)
+    	    printf("IMS: (%s) %s,%08lu,%09.5f,%010.5f,%05.0f,%03.0f,%05.1f,%05.1f, %3.3f\n",usercall,pc->name,pc->framenum,lat,lon,alt,dir,v,vv,frq);
+            if(saveLog) save_Slog( pc->name,pc->framenum,lat* 1.7453292519943E-2,lon* 1.7453292519943E-2,alt,v,dir,vv,ST_IMS,0,0,0,0,0.0,frq,0,0,0,0);
+
+	if(pc->name[0]=='I'){
+            if(nsend==0) store_sonde_db( pc->name,pc->framenum,lat* 1.7453292519943E-2,lon* 1.7453292519943E-2,alt,v,dir,vv,ST_IMS,0,0,0,0,0.0,frq,0,0,0,0);
+            store_sonde_rs( pc->name,pc->framenum,lat* 1.7453292519943E-2,lon* 1.7453292519943E-2,alt,v,dir,vv,ST_IMS,0,0,0,0,0.0,frq,0,0,0,0,usercall);
+	    pc->framesent = 1;
+	}
+
+      }
+
+    
+
+}
+
+
+static void decodeatms(const char rxb[], uint32_t rxb_len, uint32_t ip, uint32_t fromport)
+{
+   CALLSSID usercall;
+   double frq;
+   OBJNAME nam;
+   char tmps[10];
+   uint8_t tmpD[155];
+   uint32_t gpstime,frno;
+   pCONTEXTIMS pc;
+   pCONTEXTIMS pc0;
+   pCONTEXTIMS pc1;
+    int k;
+   double alt;
+   double lon;
+   double lat;
+   uint32_t tmpf;
+   char sntxt[12]={0,0};
+   char frs[10];
+    int calok=0;
+   float *fcfg = (float *)&tmpf;
+   double freq;
+   int d,m,y,hr,mn,sec;
+   uint16_t tmp,sn;
+   uint64_t tmpl;
+
+
+    getcall(rxb+62, rxb_len-62, usercall, 11ul);  //decode callsign from table
+
+    tmps[0]=rxb[68];
+    tmps[1]=rxb[69];
+    tmps[2]=rxb[70];
+    tmps[3]='.';
+    tmps[4]=rxb[71];
+    tmps[5]=rxb[72];
+    tmps[6]=rxb[73];
+    tmps[7]=0;
+    frq=atof(tmps);
+
+    time_t t = time(NULL);
+    struct tm tm = *gmtime(&t);
+    struct tm tmfn = *gmtime(&t);
+    int czas=tm.tm_mon + 1 + tm.tm_mday;
+
+    strncpy(nam,rxb,9);
+    nam[9]=0;
+
+    strncpy(tmps,rxb+ 9,2); tmps[2]=0; y=atoi(tmps);
+    strncpy(tmps,rxb+11,2); tmps[2]=0; m=atoi(tmps);
+    strncpy(tmps,rxb+13,2); tmps[2]=0; d=atoi(tmps);
+    strncpy(tmps,rxb+15,2); tmps[2]=0; hr=atoi(tmps);
+    strncpy(tmps,rxb+17,2); tmps[2]=0; mn=atoi(tmps);
+    strncpy(tmps,rxb+19,2); tmps[2]=0; sec=atoi(tmps);
+
+    strncpy(tmps,rxb+21,5);
+    tmps[5]=0;
+    alt=atof(tmps);
+
+    strncpy(tmps,rxb+26,7);
+    tmps[7]=0;
+    lat=atof(tmps)/100000;
+
+    strncpy(tmps,rxb+33,8);
+    tmps[8]=0;
+    lon=atof(tmps)/100000;
+
+    frno=sec+60*mn+3600*hr+86400*m;
+
+
+   pc = 0;
+
+      pc = pcontextatms;
+      pc0 = 0;
+      for (;;) {
+         if (pc==0) break;
+         pc1 = pc->next;
+         if (pc->tused+3600UL<systime) {
+
+            if (pc0==0) pcontextatms = pc1;
+            else pc0->next = pc1;
+            osic_free((char * *) &pc, sizeof(struct CONTEXTATMS));
+         }
+         else {
+            if (aprsstr_StrCmp(nam, 9ul, pc->name, 9ul)) break;
+            pc0 = pc;
+         }
+         pc = pc1;
+      }
+      if (pc==0) {
+         osic_alloc((char * *) &pc, sizeof(struct CONTEXTATMS));
+         if (pc==0) Error("allocate context out im memory", 31ul);
+         memset((char *)pc,(char)0,sizeof(struct CONTEXTATMS));
+         pc->next = pcontextatms;
+         pcontextatms = pc;
+         aprsstr_Assign(pc->name, 9ul, nam, 9ul);
+         if (sondeaprs_verb) osi_WrStrLn("is new ", 8ul);
+      }
+
+
+
+      if (frno > pc->framenum) {
+         pc->framesent = 0;
+         calok = 1;
+         pc->framenum = frno;
+         pc->tused = systime;
+      }
+      else if (pc->framenum==frno) {
+         if (!pc->framesent) calok = 1;
+      }
+      else if (sondeaprs_verb) {
+         osi_WrStr(" got old frame ", 16ul);
+         osic_WrINT32(frno, 1UL);
+         osi_WrStr(" expected> ", 12ul);
+         osic_WrINT32(pc->framenum, 1UL);
+         osi_WrStr(" ", 2ul);
+      }
+
+
+      if (pc && lat>0 && lat<90 && lon>0 && alt<45000 ) {
+
+        if (sondeaprs_verb)
+    	    printf("ATMS: (%s) %s,%08lu,%09.5f,%010.5f alt:%05.0f f:%06.3f\n",usercall,pc->name,frno,lat,lon,alt,frq);
+        store_sonde_db( pc->name,frno,lat* 1.7453292519943E-2,lon* 1.7453292519943E-2,alt,0,0,0,ST_ATMS,0,0,0,0,0.0,frq,0,0,0,0);
+        store_sonde_rs( pc->name,frno,lat* 1.7453292519943E-2,lon* 1.7453292519943E-2,alt,0,0,0,ST_ATMS,0,0,0,0,0.0,frq,0,0,0,0,usercall);
+        if(saveLog) save_Slog( pc->name,frno,lat* 1.7453292519943E-2,lon* 1.7453292519943E-2,alt,0,0,0,ST_ATMS,0,0,0,0,0.0,frq,0,0,0,0);
+        pc->framesent = 1;
+
+      }
+
+    
+
+}
+
+
+
+static void decodeskpp(const char rxb[], uint32_t rxb_len, uint32_t ip, uint32_t fromport){
+
+    char ToHash[300];
+    char Pass[20];
+    char dp=strlen(dbPass);
+    char cp=strlen(mycall);
+    double dlat,dlon;
+    char str[100];
+
+    if((dp>4)||(cp>3)){
+
+        if(dp<4){      
+            sprintf(str,"%u",passAprs(mycall));
+            strcpy(Pass,str);
+        }
+        else
+            strcpy(Pass,dbPass);
+        str[0]=0;
+
+        sprintf(UDPbuf, "S3;3;3;0;%u,%s;",rxb_len,mycall);
+	strncat(UDPbuf,rxb,rxb_len);
+
+        strcpy(ToHash,UDPbuf);
+        strcat(ToHash,Pass);
+        char *hash = str2md5(ToHash, strlen(ToHash));
+
+        strcat(UDPbuf,";");
+        strcat(UDPbuf,hash);
+
+        if (sendto(sockfd, UDPbuf, BUFLEN, 0, (struct sockaddr*)&serv_addr, slen)==-1)
+            printf("err: sendto()");
+        else
+            printf("SKPP send to DB\n");
+    }
+
+
+}
 
 
 
@@ -4144,6 +4586,10 @@ static void udprx(void)
       case 100: decodem20(chan[sondemod_LEFT].rxbuf, 520ul, ip, fromport); break;
       case 61:  decodepils(chan[sondemod_LEFT].rxbuf, 520ul, ip, fromport); break;
       case 115: decodemp3(chan[sondemod_LEFT].rxbuf, 115ul, ip, fromport); break;
+      case 74:  decodeims(chan[sondemod_LEFT].rxbuf, 66ul, ip, fromport); break;	
+      case 73:  decodeatms(chan[sondemod_LEFT].rxbuf, 65ul, ip, fromport); break;	
+      case SKPFRL: decodeskpp(chan[sondemod_LEFT].rxbuf, 115ul, ip, fromport); break;
+
       default: fprintf(stderr,"unsupported frame len %d\n", len);
    }
 } 
@@ -4152,29 +4598,9 @@ static void udprx(void)
 X2C_STACK_LIMIT(100000l)
 extern int main(int argc, char **argv)
 {
-   char ip[50],i;
-   
-   if(disSKP==0){
-	if(h2ip("skp.wodzislaw.pl",ip)){
-	    fprintf(stderr,"\r\nCan't resolve DNS address using 194.140.233.120\r\n");
-	    sprintf(ip,"194.140.233.120");
-	    //return 0;
-	}
-   }
+   char i;
 
-    if ((sockfd = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP))==-1)
-        printf("err: socket\n");
-
-    bzero(&serv_addr, sizeof(serv_addr));
-    serv_addr.sin_family = AF_INET;
-    serv_addr.sin_port = htons(PORT);
-    if (inet_aton(ip, &serv_addr.sin_addr)==0)
-    {
-        fprintf(stderr, "inet_aton() failed\n");
-        exit(1);
-    }
-
-
+   SKPip[0]=0;
 
    for(i=0;i<DBS_SIZE;i++) memset(&dBs[i],0,sizeof(struct DBS));
 
