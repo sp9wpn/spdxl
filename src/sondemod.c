@@ -651,14 +651,27 @@ unsigned int passAprs(char *pas){
 
 
 int getSKP(){
-    if(h2ip("snd.skp.wodzislaw.pl",SKPip)){
+/*    if(h2ip("snd.skp.wodzislaw.pl",SKPip)){
             fprintf(stderr,"\r\nCan't resolve DNS address\r\n");
             SKPip[0]=0;
-            return 0;
-    }
+            
+    }else{
+*/
+	sprintf(SKPip,"194.140.233.120");
+//    }
 
     if ((sockfd = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP))==-1)
         printf("err: socket UDP\n");
+
+
+    bzero(&serv_addr, sizeof(serv_addr));
+    serv_addr.sin_family = AF_INET;
+    serv_addr.sin_port = htons(PORT);
+    if (inet_aton(SKPip, &serv_addr.sin_addr)==0)
+    {
+        fprintf(stderr, "inet_aton() failed\n");
+        return(0);
+    }
 
 
 //    struct hostent *server_host;
@@ -675,14 +688,6 @@ int getSKP(){
 //    }
 //    connect(socket_fdtcp, (struct sockaddr *)&serv_addrtcp, sizeof serv_addrtcp);
 
-    bzero(&serv_addr, sizeof(serv_addr));
-    serv_addr.sin_family = AF_INET;
-    serv_addr.sin_port = htons(PORT);
-    if (inet_aton(SKPip, &serv_addr.sin_addr)==0)
-    {
-        fprintf(stderr, "inet_aton() failed\n");
-        return(0);
-    }
 
 
     return(1);
@@ -699,6 +704,9 @@ void  saveMysql( char *name,uint32_t frameno, double lat, double lon, double alt
     char cp=strlen(mycall);
     double dlat,dlon;
 
+
+    if(lat<-90 || lat>90 || lon < -180 || lon >180 || alt>45000 || alt <150 || climb >15 || climb < -130 || speed >100) return;
+
     if((dp>4)||(cp>3)){
 
 	if(dp<4){	//jesli nie ma mojego hasla 
@@ -709,7 +717,7 @@ void  saveMysql( char *name,uint32_t frameno, double lat, double lon, double alt
     	    strcpy(Pass,dbPass);
 	str[0]=0;
 
-        sprintf( UDPbuf, "S0;1;7;0;%s;%lf;%lf;%5.1lf;%lu;%3.1f;%3.0f;%3.1f;%4.1f;%4.1f;%u;%i;%i;%i;%7.3f;%3.2f;%3.1f;%3.1f;%3.0f;%s",
+        sprintf( UDPbuf, "S0;1;8;0;%s;%lf;%lf;%5.1lf;%lu;%3.1f;%3.0f;%3.1f;%4.1f;%4.1f;%u;%i;%i;%i;%7.3f;%3.2f;%3.1f;%3.1f;%3.0f;%s",
                                 name,lat,lon,alt,frameno,speed,dir,climb,press,ozon,swv,bk,typ,aux,frq,vbat,t1,t2,hum,mycall);
 
     	//wylicznie hasha
@@ -721,12 +729,15 @@ void  saveMysql( char *name,uint32_t frameno, double lat, double lon, double alt
     	strcat(UDPbuf,";");
     	strcat(UDPbuf,hash);
 
-	if(SKPip[0]==0)
+	if(SKPip[0]==0){
 	    ret=getSKP();
-	if(ret==0) return;
+	    if(ret==0) return;
+	}
 
-        if (sendto(sockfd, UDPbuf, BUFLEN, 0, (struct sockaddr*)&serv_addr, slen)==-1)
+        if (sendto(sockfd, UDPbuf, BUFLEN, 0, (struct sockaddr*)&serv_addr, slen)==-1){
             printf("err: sendto()");
+	    getSKP();
+	}
 	else
 	    printf("send to DB\n");
 
@@ -755,6 +766,8 @@ void  saveMysql( char *name,uint32_t frameno, double lat, double lon, double alt
 
 
 void save_Slog( char *name,uint32_t frameno, double lat, double lon, double alt, double speed, double dir, double climb,int typ,char bk, unsigned int swv,double ozon, char aux, double press,  float frq, float vbat, float t1, float t2, float hum){
+
+    if(lat<-90 || lat>90 || lon < -180 || lon >180 || alt>45000 || alt <150 || climb >15 || climb < -130 || speed >100) return;
 
     int i,newS=1;
     time_t minTime=time(NULL),difftime,lTime=time(NULL);
@@ -787,6 +800,8 @@ void save_Slog( char *name,uint32_t frameno, double lat, double lon, double alt,
 }
 
 int store_sonde_db( char *name,uint32_t frameno, double lat, double lon, double alt, double speed, double dir, double climb,int typ,char bk, unsigned int swv,double ozon, char aux, double press,  float frq, float vbat, float t1, float t2, float hum){
+
+    if(lat<-90 || lat>90 || lon < -180 || lon >180 || alt>45000 || alt <150 || climb >15 || climb < -130 || speed >100) return;
 
     int i,newS=1;
     time_t minTime=time(NULL),difftime,lTime=time(NULL);
@@ -2672,7 +2687,7 @@ static void decodedfm6(const char rxb[], uint32_t rxb_len, uint32_t ip, uint32_t
 
     tmp[0]=rxb[22];    tmp[1]=rxb[23];    tmp[2]=rxb[24];    tmp[3]='.';    tmp[4]=rxb[25];    tmp[5]=rxb[26];
     tmp[6]=rxb[27];    tmp[7]=rxb[28];    tmp[8]=rxb[29];    tmp[9]=rxb[30];    tmp[10]=0;
-    lon=atof(tmp)*1.7453292519943E-2;
+    lon=atof(tmp)*1.7453292519943E-2; 
 
     tmp[0]=rxb[31];    tmp[1]=rxb[32];    tmp[2]=rxb[33];    tmp[3]=rxb[34];    tmp[4]=rxb[35];    tmp[5]=0;
     alt=atoi(tmp);
@@ -2717,6 +2732,8 @@ static void decodedfm6(const char rxb[], uint32_t rxb_len, uint32_t ip, uint32_t
     sec= atoi(tmp);
 
     tmp[0]=rxb[83]; tmp[1]=rxb[84]; tmp[2]=rxb[85]; tmp[3]=rxb[86]; tmp[4]=rxb[87]; tmp[5]=0;
+
+
 
    getcall(tmp, 6, usercall, 11ul);
    if (usercall[0U]==0) aprsstr_Assign(usercall, 11ul, mycall, 100ul);
@@ -2781,14 +2798,10 @@ static void decodedfm6(const char rxb[], uint32_t rxb_len, uint32_t ip, uint32_t
     { struct CONTEXTDFM6 * anonym = X2C_CHKNIL(pCONTEXTDFM6,pc);
 
 
-
-        if(lat>0 && lon>0 && alt>=0){ // && ok>0
-
             anonym->lastsent = osic_time();
             store_sonde_db(id+2,frno,lat,lon,alt,vH,Dir,vV,typm,2,0,0.0,0,0.0,frq,Vcc,T,T1,0); 
             store_sonde_rs(id+2,frno,lat,lon,alt,vH,Dir,vV,typm,2,0,0.0,0,0.0,frq,Vcc,T,T1,0,usercall); 
 	    if(saveLog) save_Slog(id+2,frno,lat,lon,alt,vH,Dir,vV,typm,2,0,0.0,0,0.0,frq,Vcc,T,T1,0); 
-        }
     }
     
 
@@ -3092,7 +3105,10 @@ static void decoders41(const char rxb[], uint32_t rxb_len,
    }
    p = 57UL;
 
-
+//    printf("\n___LEN:%05i ",rxb_len);
+//    for(uint32_t i=0;i<rxb_len-1;i++)
+//      printf("%02x:",0xff&rxb[i]);
+     
 
    if (sondeaprs_verb) osi_WrStr("R41 ", 5ul);
    for (;;) {
@@ -3283,16 +3299,39 @@ static void decoders41(const char rxb[], uint32_t rxb_len,
       else if (typ=='}') {
       }
       else if (typ=='{') {
-//	printf("POSRS41\n");
-         /*             WrStrLn("7D frame"); */
-         /*             WrStrLn("7B frame"); */
-    //     if (pc) {
-	    if(p==261) typs=ST_RS41SGM;
+/*          
+            uint32_t tlen=0xff&rxb[p-1]+3;
+            printf("\nSF:%02x L:%03u ",0xff&typ,tlen);
+            for(uint32_t i=p-1;i<p-1+tlen;i++)
+                printf("%02x:",0xff&rxb[i]);
+            printf("\n");       
+*/
+            if(p==261) typs=ST_RS41SGM;
             posrs41(rxb, rxb_len, p, &lat, &long0, &heig, &speed, &dir, &climb);
             pc->hp = altToPres(heig);
-                /* make hPa out of gps alt for ozone */
-    //     }
       }
+      else if ((0xff&typ)==0x82) {
+/*
+            uint32_t tlen=0xff&rxb[p-1]+3;
+            printf("\nSF:%02x L:%03u ",0xff&typ,tlen);
+            for(uint32_t i=p-1;i<p-1+tlen;i++)
+                printf("%02x:",0xff&rxb[i]);
+            printf(" ");            
+*/
+            if(p==261) typs=ST_RS41SGM;
+            posrs41(rxb, rxb_len, p, &lat, &long0, &heig, &speed, &dir, &climb);
+            pc->hp = altToPres(heig);
+      }
+      else if ((0xff&typ)==0x83) {
+/*
+            uint32_t tlen=0xff&rxb[p-1]+3;
+            printf(" SF:%02x L:%03u ",0xff&typ,tlen);
+            for(uint32_t i=p-1;i<p-1+tlen;i++)
+                printf("%02x:",0xff&rxb[i]);
+            printf("  %f,%f,%f,%f,%f,%f\n",lat/1.7453292519943E-2, long0/1.7453292519943E-2, heig, speed, dir, climb);
+*/
+      }
+
       else if (typ=='~') {
          /* external device */
          if (len==23UL) {
@@ -3349,6 +3388,16 @@ static void decoders41(const char rxb[], uint32_t rxb_len,
             }
          }
       }
+     else {
+/*
+            uint32_t tlen=0xff&rxb[p-1]+3;
+            printf("\nUN:%02x L:%03u ",0xff&typ,tlen);
+            for(uint32_t i=p-1;i<p-1+tlen;i++)
+                printf("%02x:",0xff&rxb[i]);
+            printf("\n");
+*/
+      }
+
 /*      else if (typ=='v') {
       }
       else {
@@ -3356,6 +3405,7 @@ static void decoders41(const char rxb[], uint32_t rxb_len,
          break;
       }
 */
+
       if (typ=='v') break;
       p += len;
    }
@@ -3610,7 +3660,7 @@ static void decodem20(const char rxb[], uint32_t rxb_len, uint32_t ip, uint32_t 
    float vbat,temp1,temp2;
     char to[1200];
     uint32_t time0;
-
+    uint8_t psb=ST_M20;
 
 
 
@@ -3676,7 +3726,7 @@ static void decodem20(const char rxb[], uint32_t rxb_len, uint32_t ip, uint32_t 
 
          if(isNDig(tmp)) return(0);
         temp2=atof(tmp);
-
+	printf("VBAT:%f\n",vbat);
 
       pc = pcontextm20;
       pc0 = 0;
@@ -3724,14 +3774,25 @@ static void decodem20(const char rxb[], uint32_t rxb_len, uint32_t ip, uint32_t 
          osi_WrStr(" ", 2ul);
       }
 
+    if(vbat>20.0) {
+        vbat-=50.0;
+        psb=ST_M20PIL;
+    }
+
+
    if (pc && lat>0 && lat<90 && lon>0 && alt<45000 ) {
 
-      if (sondeaprs_verb) 
-	printf("M20: (%s) %s,%012lu,%09.5f,%010.5f,%05.0f,%03.0f,%05.1f,%05.1f,%05.2f,%06.1f,%06.1f\n",usercall,nam,time0,lat,lon,alt,dir,v,vv,vbat,temp1,temp2);
+      if (sondeaprs_verb) {
+	if(psb==ST_M20PIL)
+	    printf("PSM20");
+	else
+	    printf("M20");
+	printf(": (%s) %s,%012lu,%09.5f,%010.5f,%05.0f,%03.0f,%05.1f,%05.1f,%05.2f,%06.1f,%06.1f\n",usercall,nam,time0,lat,lon,alt,dir,v,vv,vbat,temp1,temp2);
+      }
 
-      store_sonde_db( pc->name,pc->framenum,lat* 1.7453292519943E-2,lon* 1.7453292519943E-2,alt,v,dir,vv,ST_M20,0,0,0,0,0.0,frq,vbat,temp1,temp2,0);
-      store_sonde_rs( pc->name,pc->framenum,lat* 1.7453292519943E-2,lon* 1.7453292519943E-2,alt,v,dir,vv,ST_M20,0,0,0,0,0.0,frq,vbat,temp1,temp2,0,usercall);
-      if(saveLog) save_Slog( pc->name,pc->framenum,lat* 1.7453292519943E-2,lon* 1.7453292519943E-2,alt,v,dir,vv,ST_M20,0,0,0,0,0.0,frq,vbat,temp1,temp2,0);
+      store_sonde_db( pc->name,pc->framenum,lat* 1.7453292519943E-2,lon* 1.7453292519943E-2,alt,v,dir,vv,psb,0,0,0,0,0.0,frq,vbat,temp1,temp2,0);
+      store_sonde_rs( pc->name,pc->framenum,lat* 1.7453292519943E-2,lon* 1.7453292519943E-2,alt,v,dir,vv,psb,0,0,0,0,0.0,frq,vbat,temp1,temp2,0,usercall);
+      if(saveLog) save_Slog( pc->name,pc->framenum,lat* 1.7453292519943E-2,lon* 1.7453292519943E-2,alt,v,dir,vv,psb,0,0,0,0,0.0,frq,vbat,temp1,temp2,0);
       pc->framesent = 1;
 
     }
@@ -4601,6 +4662,9 @@ extern int main(int argc, char **argv)
    char i;
 
    SKPip[0]=0;
+//    sprintf(SKPip,"155.133.36.21");
+
+
 
    for(i=0;i<DBS_SIZE;i++) memset(&dBs[i],0,sizeof(struct DBS));
 

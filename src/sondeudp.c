@@ -113,8 +113,7 @@ static char sondeudp_DATAFRAME = 'i';
   rs41x 0x86, 0x35, 0xf4, 0x40, 0x93, 0xdf, 0x1a, 0x60
   rs41  0x10, 0xB6, 0xCA, 0x11, 0x22, 0x96, 0x12, 0xF8
 */
-#define sondeudp_RHEAD41 "000010000110110101010011100010000100010001101001010\
-0100000011111"
+#define sondeudp_RHEAD41 "0000100001101101010100111000100001000100011010010100100000011111"
 
 static uint8_t sondeudp_EXOR41[64] = {150U,131U,62U,81U,177U,73U,8U,152U,
                 50U,5U,89U,14U,249U,68U,198U,38U,33U,96U,194U,234U,121U,93U,
@@ -724,7 +723,6 @@ static void initdfir(DFIRTAB dfirtab, uint32_t fg)
    } /* end for */
 } /* end initdfir() */
 
-//pierwsza zmiana
 static void initafir(AFIRTAB atab, uint32_t F0, uint32_t F1, float eq)
 {
    uint32_t f;
@@ -878,7 +876,6 @@ static char packcall(char cs[], uint32_t cs_len,
          goto label;
       }
    }
-//druga zmiana
    else if (cs[i]) {
       packcall_ret = 0;
       goto label;
@@ -1182,7 +1179,6 @@ static void Parms(void)
    struct IMET * anonym8;
    struct MP3 * anonym9;
    struct SKPP * anonym11;
-// a tu troche siana
    struct IMS * anonym12;
    struct ATMS * anonym13;
    err = 0;
@@ -1485,7 +1481,6 @@ static void Parms(void)
             }
             adcrate = cnum;
          }
-//tutaj sie cos wysypalo
          else if (h[1U]=='F') {
             osi_NextArg(h, 1024ul);
             if (!aprsstr_StrToCard(h, 1024ul, &cnum)) err = 1;
@@ -2017,7 +2012,6 @@ static uint16_t crcm10(int32_t len, const char buf[], uint32_t buf_len)
    cs = 0U;
    tmp = len-1L;
    i = 0L;
-//tutaj tez sie chyba cos stalo
    if (i<=tmp) for (;; i++) {
       b = (uint16_t)(uint32_t)(uint8_t)buf[i];
       b = X2C_LSH(b,16,-1)|X2C_LSH(b&0x1U,16,7);
@@ -2321,7 +2315,6 @@ static void decodeframe10(uint32_t m){
              if (dir<0.0) dir = 360.0+dir;
 	 } 
 
-//no dobra, dosc tego zartowania
 
     int i,j,k,l;
     unsigned int byte;
@@ -2549,7 +2542,6 @@ float M20get_Temp(uint32_t m) {
     float adc_max = 4095.0; // ADC12
     float x, R;
     float T = 0;    // T/Kelvin
-//teraz czas do glowkowania
     struct M20 * anonym = &chan[m].m20;
 
     scT     =  0; //(unsigned char)anonym->rxbuf[0x3E]; // adr_0455h
@@ -2613,6 +2605,7 @@ static void decodeframe20(uint32_t m)
    double lat;
    float vbat;
    float temp1,temp2;
+   float psb=0.0;
    uint32_t time0;
    uint32_t id;
    int k;
@@ -2629,10 +2622,10 @@ static void decodeframe20(uint32_t m)
 
       if (((unsigned char)anonym->rxbuf[0]==0x45 && (unsigned char)anonym->rxbuf[1]==0x20) && cs==m10card(anonym->rxbuf, 70ul, 68L, 2L)) {
          /* crc ok */
-//	    printf("\n");
-//	    for(k=0;k<70;k++)
-//		printf("%02x",(unsigned char)anonym->rxbuf[k]);
-//   printf("\n");
+	    printf("\n");
+	    for(k=0;k<70;k++)
+		printf("%02x",(unsigned char)anonym->rxbuf[k]);
+   printf("\n");
 
 	
 	     tow=0;
@@ -2644,7 +2637,11 @@ static void decodeframe20(uint32_t m)
 
 	     unsigned char w[4];
 	     week=0;
-	     
+
+	     if((unsigned char)anonym->rxbuf[64]==0 && (unsigned char)anonym->rxbuf[65]==0 && (unsigned char)anonym->rxbuf[66]==0) { psb=50.0; }
+
+
+
 
 	     week=  (((unsigned char)anonym->rxbuf[27]>>4)&0x0f)*1000 ;
 	     week+= ((unsigned char)anonym->rxbuf[27])&0x0f;
@@ -2685,7 +2682,6 @@ static void decodeframe20(uint32_t m)
 
 	     if (ci>32767L) ci -= 65536L;
              vn = (double)ci/ 1e2;
-//bociana dziobal szpak
              //ci = (int32_t)m10card(anonym->rxbuf, 70, 0x18, 2L);
 //	     ci=(int32_t)anonym->rxbuf[0x19]<<8 | anonym->rxbuf[0x18];
 	     ci=0xff&anonym->rxbuf[0x18]; ci<<=8;  ci|=0xff& anonym->rxbuf[0x19];
@@ -2726,7 +2722,10 @@ static void decodeframe20(uint32_t m)
             if (verb) {
         	//WrChan((int32_t)m);
 		printCnDT(m);
-        	osi_WrStr("M20 ", 5ul);
+		if(psb>10)
+        	    osi_WrStr("PS20 ", 5ul);
+		else
+		    osi_WrStr("M20 ", 5ul);
         	osi_WrStr(ids, 201ul);
         	osi_WrStr(" ", 2ul);
         	osic_WrFixed((float)lat, 5L, 1UL);
@@ -2764,7 +2763,7 @@ static void decodeframe20(uint32_t m)
 	    s[22]=0;
 	    printf("\n");
 	    if( lat>-90.0 && lat<90.0 && lon>=-180.0 && lon<=180.0 && alt>0.0 && alt<45000.0){
-		sprintf(s,"%s,%012lu,%09.5f,%010.5f,%05.0f,%03.0f,%05.1f,%05.1f,%05.2f,%06.1f,%06.1f\n",s,time0,lat,lon,alt,dir,v,vv,vbat,temp1,temp2);
+		sprintf(s,"%s,%012lu,%09.5f,%010.5f,%05.0f,%03.0f,%05.1f,%05.1f,%05.2f,%06.1f,%06.1f\n",s,time0,lat,lon,alt,dir,v,vv,(vbat+psb),temp1,temp2);
 		alludp(chan[m].udptx, 100, s, 100);
 	    }
       }
@@ -2843,7 +2842,6 @@ static void demodbit20(uint32_t m, float u, float u0)
       if (anonym->lastmanch==d) {
          anonym->manchestd += (32767L-anonym->manchestd)/16L;
       }
-//a potem byla zmiana ;)
       bit = d!=anonym->lastmanch;
       if (anonym->manchestd>0L) {
          demodbyte20(m, bit);
@@ -3074,7 +3072,6 @@ int poly_divmod(uint8_t p[], uint8_t q[], uint8_t *d, uint8_t *r) {
           r[i] = 0;
       }
   }
-//i szpak dziobal bociana
   else if (deg_p < deg_q) {
       for (i = 0; i <= MAX_DEG; i++) d[i] = 0;
       for (i = 0; i <= deg_p; i++) r[i] = p[i]; // r(x)=p(x), deg(r)<deg(q)
@@ -3531,7 +3528,6 @@ static void demodbyteIMS(uint32_t m, char d)
 		anonym->rxbuf[5UL]=0b00110010;
                 anonym->rxp = 6UL;
          }
-//potem byly jeszcze dwie takie zmiany ;)
          anonym->rxbitc = 0UL;
       }
       else {
@@ -4291,7 +4287,6 @@ static void demodbytepilot(uint32_t m, char d)
                 cnt++;
 
 
-//i kto byl dziobany?
 		if (crc == crc16rev(anonym->rxbuf, 48UL) && lat>0 && lat<89.9 && long0>0 && long0<179.9 && heig>1 && heig<35000) {
 		    anonym->poklat=lat;
 		    anonym->poklon=long0;
@@ -5891,8 +5886,9 @@ void print_gpx(uint32_t m) {
 	  if((chan[m].dfm6.id[0]!='D')||(chan[m].dfm6.id[1]!='6')&&(chan[m].dfm6.id[1]!='9')&&(chan[m].dfm6.id[1]!='F')&&(chan[m].dfm6.id[1]!='D'))
 	    chan[m].dfm6.id[0]=0;
 
-	  printf("%02d:DFM %s ",m+1,chan[m].dfm6.id);
-	  printf("[%3d] [%04i-%02i-%02i %02i:%02i:%02i ]", chan[m].dfm6.frnr,  chan[m].dfm6.yr,chan[m].dfm6.mon,chan[m].dfm6.day, chan[m].dfm6.hr,chan[m].dfm6.min,(int)chan[m].dfm6.sek );
+
+	  printf("%02d: (%04i-%02i-%02i %02i:%02i:%02i)", m+1,  chan[m].dfm6.yr,chan[m].dfm6.mon,chan[m].dfm6.day, chan[m].dfm6.hr,chan[m].dfm6.min,(int)chan[m].dfm6.sek );
+	  printf(":DFM %s %04d ",chan[m].dfm6.id,chan[m].dfm6.frnr);
 	  printf("lat: %.6f ", chan[m].dfm6.lat);
 	  printf("lon: %.6f ", chan[m].dfm6.lon);
 	  printf("alt: %.1f ", chan[m].dfm6.alt);
@@ -6073,7 +6069,6 @@ static void decodeframe6(uint32_t m)
 	  }
 
       }
-//i jak koledzy, fajne te zmiany?
    }
 } /* end decodeframe6() */
 
@@ -6610,7 +6605,6 @@ static void demodbit34(uint32_t channel, char d)
          anonym->rxbitc = 0UL;
       }
 
-//ciekawe jak bardzo sie podobaly ;)
 
       else if ((anonym->rxbytec&2097151UL)==3070UL) {
          /*IF NOT verb THEN WrStrLn(""); END; */
@@ -6945,8 +6939,9 @@ static void getadc(void)
                             anonym5->enabled =1;
                             anonymz->enabled =1;
                             anonym9->enabled =1;
-			    anonym11->enabled =1;
+			    anonym11->enabled =0;
 			    anonym12->enabled =1;
+			    anonym13->enabled =1;
 
 			    break;
 		    case ST_M10:
@@ -6955,6 +6950,7 @@ static void getadc(void)
 			    anonym6->enabled =1;
 			    break;
 		    case ST_M20:
+		    case ST_M20PIL:
 			    anonym7->enabled =1;
 		    case ST_C34:
 		    case ST_C50:
