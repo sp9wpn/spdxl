@@ -2713,11 +2713,12 @@ static void decodeframe20(uint32_t m)
 	    unsigned long bSN;
 	    unsigned long sn1,sn2,sn3,sn1a;
 	    bSN=(anonym->rxbuf[pos_SN20]<<16) & 0xff0000 | (anonym->rxbuf[pos_SN20+1]<<8) &0xff00 | (anonym->rxbuf[pos_SN20+2]) & 0xff;
-	    sn1a =(bSN>>16)&0x7f;
-	    sn1=100*(int)(sn1a/12)+ sn1a%12+1;
-	    sn3 =((bSN>>5)&0x1f)<<11 | ((bSN >>10)&0x3f) |  (bSN & 0x1f)<<6;
+        sn1a =(bSN>>16)&0x7f;
+        sn1=100*(int)(sn1a/12)+ sn1a%12+1;
+        sn3= ((bSN<<6)&0xfc0) | (bSN>>10)&0x3f;
+        sn2= 2+((bSN>>8)&0x03);
+        sprintf(ids,"%03u%01u%05u\n",sn1,sn2,sn3);
 
-	    sprintf(ids,"%03u2%05u\n",sn1,sn3);
 	    ids[9U] = 0;
     
 //	    temp1=M20get_Temp(m);
